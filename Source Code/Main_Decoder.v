@@ -48,7 +48,7 @@ module Main_Decoder(
                 ImmSrc = 3'b100; ResultSrc = 2'b11;
             end
             7'b0010111: begin // AUIPC
-                RegWrite = 1'b1; AUIPC = 1'b1; ALUSrc = 1'b1; // <-- FIXED: Added ALUSrc = 1'b1
+                RegWrite = 1'b1; AUIPC = 1'b1; ALUSrc = 1'b1;
                 ImmSrc = 3'b100; ResultSrc = 2'b00;
             end
             default: ;
