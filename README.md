@@ -92,65 +92,194 @@ The ALU decoder and execute stage support the corresponding ALU operations for t
 ## Architecture Block Diagram
 
 ```mermaid
-flowchart LR
-    subgraph IF[Fetch Stage]
-        PC[PC_Module]
-        IMEM[Instruction_Memory]
-        PCADD[PC_Adder]
-        PCMUX[PC_MUX]
+graph LR
+    %% Styles
+    classDef reg fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef mux fill:#ff9,stroke:#333,stroke-width:2px;
+    classDef alu fill:#9cf,stroke:#333,stroke-width:2px;
+    classDef mem fill:#fcf,stroke:#333,stroke-width:2px;
+    classDef ctrl fill:#afa,stroke:#333,stroke-width:2px;
+
+    subgraph FetchStage [Fetch Stage]
+        direction LR
+        PC[PC]:::reg -->|PCF| InstMem[Instruction Memory]:::mem
+        PC -->|PCF| PCPlus4[PCPlus4]:::alu
+        PCPlus4 -->|PCPlus4F| Pipe_FD
+        InstMem -->|InstrF| Pipe_FD
     end
 
-    subgraph ID[Decode Stage]
-        CTRL[Control_Unit_Top]
-        RF[Register_File]
-        EXT[Sign_Extend]
+    subgraph Pipe_FD [IF/ID Pipeline Register]
+        direction LR
+        PCD[PCD]:::reg
+        PCPlus4D[PCPlus4D]:::reg
+        InstrD[InstrD]:::reg
     end
 
-    subgraph EX[Execute Stage]
-        FWD_A[Mux_3_by_1 Src_A]
-        FWD_B[Mux_3_by_1 Src_B]
-        AUIMUX[Mux AUIPC]
-        ALUSRCMUX[Mux ALUSrc]
-        ALU[ALU]
-        BR[Branch Comparator]
+    subgraph DecodeStage [Decode Stage]
+        direction LR
+        ControlUnit[Control Unit]:::ctrl
+        RegFile[Register File]:::mem
+        Extend[Extend]:::alu
+        
+        InstrD -->|rs1| RegFile
+        InstrD -->|rs2| RegFile
+        InstrD -->|rd| RegFile
+        InstrD -->|op| ControlUnit
+        InstrD -->|funct3| ControlUnit
+        InstrD -->|funct7| ControlUnit
+        InstrD -->|ImmSrcD| Extend
+        
+        ControlUnit -->|RegWriteD| Pipe_DE
+        ControlUnit -->|ResultSrcD| Pipe_DE
+        ControlUnit -->|MemWriteD| Pipe_DE
+        ControlUnit -->|JumpD| Pipe_DE
+        ControlUnit -->|BranchD| Pipe_DE
+        ControlUnit -->|ALUControlD| Pipe_DE
+        ControlUnit -->|ALUSrcD| Pipe_DE
+        
+        RegFile -->|RD1| Pipe_DE
+        RegFile -->|RD2| Pipe_DE
+        Extend -->|ExtImmD| Pipe_DE
+        InstrD -->|Rs1D| HazardUnit
+        InstrD -->|Rs2D| HazardUnit
     end
 
-    subgraph MEM[Memory Stage]
-        DMEM[Data_Memory]
+    subgraph Pipe_DE [ID/EX Pipeline Register]
+        direction LR
+        RD1E[RD1E]:::reg
+        RD2E[RD2E]:::reg
+        PCE[PCE]:::reg
+        Rs1E[Rs1E]:::reg
+        Rs2E[Rs2E]:::reg
+        RdE[RdE]:::reg
+        ExtImmE[ExtImmE]:::reg
+        PCPlus4E[PCPlus4E]:::reg
+        
+        %% Control signals pipelined
+        RegWriteE[RegWriteE]:::reg
+        ResultSrcE[ResultSrcE]:::reg
+        MemWriteE[MemWriteE]:::reg
+        JumpE[JumpE]:::reg
+        BranchE[BranchE]:::reg
+        ALUControlE[ALUControlE]:::reg
+        ALUSrcE[ALUSrcE]:::reg
     end
 
-    subgraph WB[Writeback Stage]
-        WBMUX[Mux_4_by_1 Result]
+    subgraph ExecuteStage [Execute Stage]
+        direction LR
+        Mux_ForwardA{Mux}:::mux
+        Mux_ForwardB{Mux}:::mux
+        Mux_ALUSrc{Mux}:::mux
+        ALU[ALU]:::alu
+        Mux_PCSrc{Mux}:::mux
+        Add_PCTarget[Add]:::alu
+
+        RD1E --> Mux_ForwardA
+        RD2E --> Mux_ForwardB
+        ExtImmE --> Mux_ALUSrc
+        Mux_ForwardB --> Mux_ALUSrc
+        
+        Mux_ForwardA -->|SrcA| ALU
+        Mux_ALUSrc -->|SrcB| ALU
+        ALUControlE --> ALU
+        
+        ALU -->|ALUResultE| Pipe_EM
+        ALU -->|ZeroE| AND_PCSrc
+        BranchE --> AND_PCSrc
+        AND_PCSrc[AND] --> Mux_PCSrc
+        PCE --> Add_PCTarget
+        PCPlus4E --> Add_PCTarget
+        Add_PCTarget --> Mux_PCSrc
+        Mux_PCSrc -->|PCSrcE| PC
+        
+        Mux_ForwardB -->|WriteDataE| Pipe_EM
+        RdE --> Pipe_EM
+        ResultSrcE --> Pipe_EM
+        RegWriteE --> Pipe_EM
+        MemWriteE --> Pipe_EM
+        PCPlus4E --> Pipe_EM
     end
 
-    HZ[Hazard_unit]
+    subgraph Pipe_EM [EX/MEM Pipeline Register]
+        direction LR
+        ALUResultM[ALUResultM]:::reg
+        WriteDataM[WriteDataM]:::reg
+        RdM[RdM]:::reg
+        PCPlus4M[PCPlus4M]:::reg
+        RegWriteM[RegWriteM]:::reg
+        ResultSrcM[ResultSrcM]:::reg
+        MemWriteM[MemWriteM]:::reg
+    end
 
-    PC --> IMEM
-    IMEM --> IFID[IF/ID Registers]
-    IFID --> CTRL
-    IFID --> RF
-    IFID --> EXT
-    CTRL --> IDEX[ID/EX Registers]
-    RF --> IDEX
-    EXT --> IDEX
-    IDEX --> FWD_A
-    IDEX --> FWD_B
-    IDEX --> AUIMUX
-    IDEX --> ALUSRCMUX
-    FWD_A --> ALU
-    FWD_B --> ALUSRCMUX
-    AUIMUX --> ALU
-    ALUSRCMUX --> ALU
-    ALU --> EXMEM[EX/MEM Registers]
-    BR --> PCSRC[PCSrcE]
-    PCSRC --> PCMUX
-    EXMEM --> DMEM
-    DMEM --> MEMWB[MEM/WB Registers]
-    MEMWB --> WBMUX
-    WBMUX --> RF
-    HZ --> ID
-    HZ --> EX
-    HZ --> IF
+    subgraph MemoryStage [Memory Stage]
+        direction LR
+        DataMem[Data Memory]:::mem
+        Mux_ResultSrcM{Mux}:::mux
+        
+        ALUResultM --> DataMem
+        WriteDataM --> DataMem
+        MemWriteM --> DataMem
+        DataMem -->|ReadDataM| Mux_ResultSrcM
+        ALUResultM --> Mux_ResultSrcM
+        ResultSrcM --> Mux_ResultSrcM
+        
+        Mux_ResultSrcM --> Pipe_MW
+        RdM --> Pipe_MW
+        RegWriteM --> Pipe_MW
+        PCPlus4M --> Pipe_MW
+        RdM --> HazardUnit
+        ResultSrcM --> HazardUnit
+        MemWriteM --> HazardUnit
+        RegWriteM --> HazardUnit
+    end
+
+    subgraph Pipe_MW [MEM/WB Pipeline Register]
+        direction LR
+        ALUResultW[ALUResultW]:::reg
+        ReadDataW[ReadDataW]:::reg
+        RdW[RdW]:::reg
+        PCPlus4W[PCPlus4W]:::reg
+        RegWriteW[RegWriteW]:::reg
+        ResultSrcW[ResultSrcW]:::reg
+    end
+
+    subgraph WritebackStage [Writeback Stage]
+        direction LR
+        Mux_ResultW{Mux}:::mux
+        
+        ALUResultW --> Mux_ResultW
+        ReadDataW --> Mux_ResultW
+        ResultSrcW --> Mux_ResultW
+        
+        Mux_ResultW -->|ResultW| RegFile
+        RegWriteW --> RegFile
+        RdW --> HazardUnit
+        ResultSrcW --> HazardUnit
+        RegWriteW --> HazardUnit
+    end
+
+    subgraph HazardUnitBlock [Hazard Unit]
+        HazardUnit[Hazard Unit]:::ctrl
+        HazardUnit -->|StallF| PC
+        HazardUnit -->|StallD| Pipe_FD
+        HazardUnit -->|FlushD| Pipe_FD
+        HazardUnit -->|FlushE| Pipe_DE
+        HazardUnit -->|ForwardAE| Mux_ForwardA
+        HazardUnit -->|ForwardBE| Mux_ForwardB
+        HazardUnit -->|PCSrcE| Mux_PCSrc
+        
+        %% Forwarding paths from MEM and WB back to EX
+        ALUResultM -->|Forwarding from MEM| Mux_ForwardA
+        ALUResultM -->|Forwarding from MEM| Mux_ForwardB
+        ResultW -->|Forwarding from WB| Mux_ForwardA
+        ResultW -->|Forwarding from WB| Mux_ForwardB
+    end
+
+    %% Connections for Muxes inside Execute stage (simplified for Mermaid)
+    Mux_ForwardA -.->|1| ALUResultM
+    Mux_ForwardA -.->|2| ResultW
+    Mux_ForwardB -.->|1| ALUResultM
+    Mux_ForwardB -.->|2| ResultW
 ```
 
 ---
